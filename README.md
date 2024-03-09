@@ -1,4 +1,4 @@
-LVChat: Speech Recognition with Conversation Context Management
+LVChat: Speech Recognition Local Voice Chat with Ollama
 ==============================================================
 
 LVChat is an application that provides speech recognition capabilities with conversation context management. It supports two modes of operation: keyword activation and continuous conversation mode. The app uses Google Speech Recognition API for speech-to-text conversion and Ollama API for generating responses based on the conversation context.
@@ -13,6 +13,7 @@ Requirements
 * logging library
 * platform library
 * collections library
+* whisper library
 
 Installation
 ------------
