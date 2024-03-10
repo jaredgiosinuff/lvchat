@@ -44,8 +44,8 @@ The available command-line options are:
 
 * `--mode`: Mode of operation. Choose between 'keyword' for keyword activation and 'conversation' for continuous conversation mode. Default is 'keyword'.
 * `--keyword`: Keyword phrase to listen for in keyword mode. Default is "hey assistant".
-* `--keyword-timeout`: Timeout (in seconds) for listening for the keyword phrase. Default is 3.0.
-* `--speech-timeout`: Timeout (in seconds) for listening for speech input. Default is 2.0.
+* `--keyword-timeout`: Timeout (in seconds) for listening for the keyword phrase. Default is 5.0.
+* `--speech-timeout`: Timeout (in seconds) for listening for speech input. Default is 5.0.
 * `--pause-threshold`: Pause threshold (in seconds) for speech recognition. Default is 0.8.
 * `--max-history`: Maximum number of utterances to keep in the conversation history. Default is 10.
 * `--use-whisper`: This will use whisper instead of Google's speech recognition library for speech-to-text.
