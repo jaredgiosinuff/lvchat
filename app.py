@@ -4,11 +4,17 @@ import requests
 import argparse
 import logging
 from collections import deque
-import threading
 import whisper
 import io
 import tempfile
 import soundfile as sf
+import random
+import re
+import json
+import nltk
+
+# Ensure nltk punkt tokenizer is downloaded
+nltk.download('punkt', quiet=True)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,6 +30,7 @@ parser.add_argument('--pause-threshold', type=float, default=0.8, help='Pause th
 parser.add_argument('--max-history', type=int, default=10, help='Maximum number of utterances to keep in the conversation history.')
 parser.add_argument('--use-whisper', action='store_true', help='Use Whisper for speech recognition instead of Google Speech Recognition.')
 parser.add_argument('--whisper-model', type=str, default='tiny', choices=['tiny', 'base', 'small', 'medium', 'large'], help='Whisper model to use.')
+parser.add_argument('--stream-response', action='store_true', help='Stream the response from the language model.')
 args = parser.parse_args()
 
 # Initialize Whisper model if needed
@@ -55,6 +62,9 @@ def listen_for_keyword(source):
             audio_text = transcribe_with_whisper(audio_buffer, model)
             if args.keyword in audio_text:
                 logging.info("Keyword detected. Ready for speech...")
+                greetings = ["Hello", "How can I help you?", "Hey", "Hey Oh", "Well Met"]
+                greeting = greetings[random.randint(0, len(greetings) - 1)]
+                subprocess.call(['say', greeting])
                 return True
     else:
         try:
@@ -80,12 +90,23 @@ def listen_for_speech(source):
             audio_data = r.record(mic, duration=args.speech_timeout)
             audio_buffer = io.BytesIO(audio_data.get_wav_data())
             audio_text = transcribe_with_whisper(audio_buffer, model)
+            if audio_text:
+                thinking_responses = ["Let me think about that", "Give me, just a moment"]
+                thinking_response = thinking_responses[random.randint(0, len(thinking_responses) - 1)]
+                subprocess.call(['say', thinking_response])
             logging.info(f"User said: {audio_text}")
             return audio_text
     else:
         try:
             audio_data = r.listen(source, timeout=args.speech_timeout)
             text = r.recognize_google(audio_data).lower()
+            if text:
+                greetings = ["Hello", "How can I help you?", "Hey", "Hey Oh", "Well Met"]
+                greeting = greetings[random.randint(0, len(greetings) - 1)]
+                subprocess.call(['say', greeting])
+                thinking_responses = ["Let me think about that", "Give me, just a moment"]
+                thinking_response = thinking_responses[random.randint(0, len(thinking_responses) - 1)]
+                subprocess.call(['say', thinking_response])
             logging.info(f"User said: {text}")
             return text
         except sr.WaitTimeoutError:
@@ -100,19 +121,51 @@ def listen_for_speech(source):
 
 def send_to_ollama_and_respond(text):
     if text is None:
+        logging.info("No text to send for processing.")
         return
     conversation_history.append(f"User: {text}")
     prompt_text = "\n".join(conversation_history)
     ollama_url = "http://localhost:11434/api/generate"
-    payload = {"model": "openhermes:7b-mistral-v2.5-q4_K_M", "prompt": prompt_text, "stream": False}
-    try:
-        response = requests.post(ollama_url, json=payload).json()["response"]
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error sending request to Ollama API: {e}")
-        return
-    conversation_history.append(f"Ollama: {response}")
-    logging.info(f"Ollama said: {response}")
-    subprocess.call(['say', response])
+    payload = {"model": "openhermes:7b-mistral-v2.5-q4_K_M", "prompt": prompt_text, "stream": args.stream_response}
+
+    logging.info("Sending text to language model for processing...")
+    if args.stream_response:
+        try:
+            response = requests.post(ollama_url, json=payload, stream=True)
+            partial_response = ""
+            for line in response.iter_lines():
+                if line:
+                    data = json.loads(line)
+                    logging.info(f"Received stream line: {data}")
+                    if 'response' in data:
+                        partial_response += data['response']
+                        # Split by sentences using regex to accommodate more end punctuation marks.
+                        sentences = re.split('(?<=[.!?]) +', partial_response)
+                        for i, sentence in enumerate(sentences[:-1]):  # Exclude last item in case it's incomplete
+                            subprocess.call(['say', sentence])
+                            logging.info(f"Ollama said: {sentence}")
+                            conversation_history.append(f"Ollama: {sentence}")
+                        partial_response = sentences[-1]  # Keep the last part, as it might be incomplete
+                        
+                    if data.get("done", False):
+                        # If there's any remaining part, it's considered complete now.
+                        if partial_response.strip():
+                            subprocess.call(['say', partial_response.strip()])
+                            logging.info(f"Ollama said: {partial_response.strip()}")
+                            conversation_history.append(f"Ollama: {partial_response.strip()}")
+                        break
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error sending request to Ollama API: {e}")
+    else:
+        try:
+            response = requests.post(ollama_url, json=payload).json()
+            full_response = response.get("response", "")
+            if full_response:
+                subprocess.call(['say', full_response])
+                logging.info(f"Ollama said: {full_response}")
+                conversation_history.append(f"Ollama: {full_response}")
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Error sending request to Ollama API: {e}")
 
 def main_loop(mode):
     with sr.Microphone() as source:
