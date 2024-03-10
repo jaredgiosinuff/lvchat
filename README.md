@@ -45,6 +45,9 @@ The available command-line options are:
 * `--speech-timeout`: Timeout (in seconds) for listening for speech input. Default is 2.0.
 * `--pause-threshold`: Pause threshold (in seconds) for speech recognition. Default is 0.8.
 * `--max-history`: Maximum number of utterances to keep in the conversation history. Default is 10.
+* `--use-whisper`: This will use whisper instead of Google's speech recognition library for speech-to-text.
+* `--whisper-model`: The choices for the whisper model are 'tiny', 'base', 'small', 'medium' or 'large'.  For CPU inferencing tiny is recommended.
+* `--stream-response`: This will stream and buffer the response from ollama.  This will start speaking the response sooner, one sentence at a time.
 
 Note: The app is currently configured to use Ollama API with the "openhermes:7b-mistral-v2.5-q4\_K\_M" model at "localhost:11434". You can change these settings in the script if needed.
 
