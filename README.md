@@ -6,6 +6,8 @@ LVChat is an application that provides speech recognition capabilities with conv
 Requirements
 ------------
 
+* Ollama running on your local system, with the openhermes:7b-mistral-v2.5-q4_K_M model running.   You can change this inside the script if you do not have that model.  This will soon be customizable.
+
 * Python 3.x
 * speech\_recognition library
 * requests library
@@ -14,6 +16,7 @@ Requirements
 * platform library
 * collections library
 * whisper library
+
 
 Installation
 ------------
