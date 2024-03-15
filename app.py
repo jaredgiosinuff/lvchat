@@ -7,11 +7,14 @@ from collections import deque
 import whisper
 import io
 import tempfile
-import soundfile as sf
 import random
 import re
 import json
 import nltk
+import select
+import sys
+import termios
+import tty
 
 # Ensure nltk punkt tokenizer is downloaded
 nltk.download('punkt', quiet=True)
@@ -30,7 +33,9 @@ parser.add_argument('--pause-threshold', type=float, default=0.8, help='Pause th
 parser.add_argument('--max-history', type=int, default=10, help='Maximum number of utterances to keep in the conversation history.')
 parser.add_argument('--use-whisper', action='store_true', help='Use Whisper for speech recognition instead of Google Speech Recognition.')
 parser.add_argument('--whisper-model', type=str, default='tiny', choices=['tiny', 'base', 'small', 'medium', 'large'], help='Whisper model to use.')
-parser.add_argument('--stream-response', action='store_true', help='Stream the response from the language model.')
+parser.add_argument('--stream-response', action='store_true', default=True, help='Stream the response from the language model. Default is True.')
+parser.add_argument('--language-model', type=str, default='openhermes:7b-mistral-v2.5-q4_K_M', help='Language model to use with Ollama.')
+parser.add_argument('--verbose', action='store_true', help='Show all output from the language model, including JSON data, for debugging purposes.')
 args = parser.parse_args()
 
 # Initialize Whisper model if needed
@@ -43,6 +48,24 @@ r.pause_threshold = args.pause_threshold
 
 # Initialize conversation history
 conversation_history = deque(maxlen=args.max_history)
+
+def flush_input():
+    """Flush any pending input from stdin to ensure fresh read for spacebar."""
+    termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
+def check_for_spacebar_input_non_blocking():
+    """Non-blocking check for spacebar input, returns True if spacebar was pressed."""
+    flush_input()
+    old_settings = termios.tcgetattr(sys.stdin)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        [i, o, e] = select.select([sys.stdin], [], [], 0.1)
+        if i:
+            input_char = sys.stdin.read(1)
+            return input_char == ' '
+    finally:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    return False
 
 def transcribe_with_whisper(audio_buffer, model):
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as tmpfile:
@@ -62,9 +85,7 @@ def listen_for_keyword(source):
             audio_text = transcribe_with_whisper(audio_buffer, model)
             if args.keyword in audio_text:
                 logging.info("Keyword detected. Ready for speech...")
-                greetings = ["Hello", "How can I help you?", "Hey", "Hey Oh", "Well Met"]
-                greeting = greetings[random.randint(0, len(greetings) - 1)]
-                subprocess.call(['say', greeting])
+                greet_user()
                 return True
     else:
         try:
@@ -72,6 +93,7 @@ def listen_for_keyword(source):
             detected_text = r.recognize_google(audio).lower()
             if args.keyword in detected_text:
                 logging.info("Keyword detected. Ready for speech...")
+                greet_user()
                 return True
         except sr.WaitTimeoutError:
             logging.warning("Listening timed out while waiting for keyword to start.")
@@ -82,6 +104,16 @@ def listen_for_keyword(source):
     logging.info("Keyword not detected.")
     return False
 
+def greet_user():
+    greetings = ["Hello.. how can I help you?", "Hey there.. what can I do for you?", "Hi.. ready to assist you.", "Hello"]
+    greeting = random.choice(greetings)
+    subprocess.call(['say', greeting])
+
+def processing_model_response():
+    responses = ["Give me a moment to ponder that.", "just a moment, while I consider what you have said"]
+    response = random.choice(responses)
+    subprocess.call(['say', response])
+
 def listen_for_speech(source):
     logging.info("Listening for speech...")
     if args.use_whisper:
@@ -90,23 +122,13 @@ def listen_for_speech(source):
             audio_data = r.record(mic, duration=args.speech_timeout)
             audio_buffer = io.BytesIO(audio_data.get_wav_data())
             audio_text = transcribe_with_whisper(audio_buffer, model)
-            if audio_text:
-                thinking_responses = ["Let me think about that", "Give me, just a moment"]
-                thinking_response = thinking_responses[random.randint(0, len(thinking_responses) - 1)]
-                subprocess.call(['say', thinking_response])
             logging.info(f"User said: {audio_text}")
+            processing_model_response()
             return audio_text
     else:
         try:
             audio_data = r.listen(source, timeout=args.speech_timeout)
             text = r.recognize_google(audio_data).lower()
-            if text:
-                greetings = ["Hello", "How can I help you?", "Hey", "Hey Oh", "Well Met"]
-                greeting = greetings[random.randint(0, len(greetings) - 1)]
-                subprocess.call(['say', greeting])
-                thinking_responses = ["Let me think about that", "Give me, just a moment"]
-                thinking_response = thinking_responses[random.randint(0, len(thinking_responses) - 1)]
-                subprocess.call(['say', thinking_response])
             logging.info(f"User said: {text}")
             return text
         except sr.WaitTimeoutError:
@@ -119,6 +141,17 @@ def listen_for_speech(source):
             logging.error(f"Could not request results; {e}")
             return None
 
+def speak_sentence(sentence):
+    """Speak a single sentence, checking for spacebar input before and after speaking."""
+    if check_for_spacebar_input_non_blocking():
+        logging.info("Interrupted by user before speaking. Listening for keyword...")
+        return True
+    subprocess.call(['say', sentence])  # Speak the sentence
+    if check_for_spacebar_input_non_blocking():
+        logging.info("Interrupted by user after speaking. Listening for keyword...")
+        return True
+    return False
+
 def send_to_ollama_and_respond(text):
     if text is None:
         logging.info("No text to send for processing.")
@@ -126,46 +159,43 @@ def send_to_ollama_and_respond(text):
     conversation_history.append(f"User: {text}")
     prompt_text = "\n".join(conversation_history)
     ollama_url = "http://localhost:11434/api/generate"
-    payload = {"model": "openhermes:7b-mistral-v2.5-q4_K_M", "prompt": prompt_text, "stream": args.stream_response}
+    payload = {"model": args.language_model, "prompt": prompt_text, "stream": args.stream_response}
 
     logging.info("Sending text to language model for processing...")
-    if args.stream_response:
-        try:
-            response = requests.post(ollama_url, json=payload, stream=True)
-            partial_response = ""
+    try:
+        response = requests.post(ollama_url, json=payload, stream=args.stream_response)
+        sentence_buffer = ""
+        if args.stream_response:
             for line in response.iter_lines():
                 if line:
                     data = json.loads(line)
-                    logging.info(f"Received stream line: {data}")
+                    if args.verbose:
+                        logging.info(f"Streamed JSON data: {data}")
                     if 'response' in data:
-                        partial_response += data['response']
-                        # Split by sentences using regex to accommodate more end punctuation marks.
-                        sentences = re.split('(?<=[.!?]) +', partial_response)
-                        for i, sentence in enumerate(sentences[:-1]):  # Exclude last item in case it's incomplete
-                            subprocess.call(['say', sentence])
-                            logging.info(f"Ollama said: {sentence}")
-                            conversation_history.append(f"Ollama: {sentence}")
-                        partial_response = sentences[-1]  # Keep the last part, as it might be incomplete
-                        
-                    if data.get("done", False):
-                        # If there's any remaining part, it's considered complete now.
-                        if partial_response.strip():
-                            subprocess.call(['say', partial_response.strip()])
-                            logging.info(f"Ollama said: {partial_response.strip()}")
-                            conversation_history.append(f"Ollama: {partial_response.strip()}")
-                        break
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error sending request to Ollama API: {e}")
-    else:
-        try:
-            response = requests.post(ollama_url, json=payload).json()
-            full_response = response.get("response", "")
-            if full_response:
-                subprocess.call(['say', full_response])
-                logging.info(f"Ollama said: {full_response}")
-                conversation_history.append(f"Ollama: {full_response}")
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error sending request to Ollama API: {e}")
+                        sentence_buffer += data['response']
+                        if any(sentence_buffer.endswith(punc) for punc in '.!?'):
+                            if sentence_buffer.strip():
+                                if speak_sentence(sentence_buffer):
+                                    return
+                                conversation_history.append(f"Ollama: {sentence_buffer}")
+                                sentence_buffer = ""  # Reset buffer after speaking
+                        if data.get("done", False):
+                            break
+            if sentence_buffer.strip():
+                if speak_sentence(sentence_buffer):
+                    return
+                conversation_history.append(f"Ollama: {sentence_buffer}")
+        else:
+            data = response.json()
+            if 'response' in data:
+                sentences = re.split('(?<=[.!?]) +', data['response'])
+                for sentence in sentences:
+                    if sentence:
+                        if speak_sentence(sentence):
+                            return
+                        conversation_history.append(f"Ollama: {sentence}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending request to Ollama API: {e}")
 
 def main_loop(mode):
     with sr.Microphone() as source:
@@ -177,7 +207,8 @@ def main_loop(mode):
                 text = listen_for_speech(source)
                 if text in ["goodbye", "goodbye assistant"]:
                     logging.info("Goodbye!")
-                    subprocess.call(['say', "Goodbye!"])
+                    if speak_sentence("Goodbye!"):
+                        return
                     break
                 if text:
                     send_to_ollama_and_respond(text)
@@ -185,7 +216,8 @@ def main_loop(mode):
                 text = listen_for_speech(source)
                 if text in ["goodbye", "goodbye assistant"]:
                     logging.info("Goodbye!")
-                    subprocess.call(['say', "Goodbye!"])
+                    if speak_sentence("Goodbye!"):
+                        return
                     break
                 if text:
                     send_to_ollama_and_respond(text)
