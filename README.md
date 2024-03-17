@@ -31,7 +31,7 @@ cd lvchat
 pip install -r requirements.txt
 ```
 4. If you want to use offline wake word detection with Porcupine:
-   - Obtain a Porcupine activation key from Picovoice.
+   - Obtain a Porcupine activation key from Picovoice.  
    - Place your Porcupine model files (`.ppn` files) in the `models` folder.
 
 Usage
@@ -70,7 +70,12 @@ python app.py --mode keyword
 
 To run LVChat in continuous conversation mode with a custom keyword phrase and Porcupine wake word detection, use the following command:
 ```bash
-python app.py --mode conversation --keyword "hello assistant" --porcupine-key YOUR_ACTIVATION_KEY
+python3 app.py --verbose --pause-threshold=0.5 --speech-timeout=6.0 --language-model='dolphin-phi:2.7b-v2.6-q4_K_S' --porcupine-key='ACTIVATION_KEY' 
+```
+
+or if you set your activation key by running 'export ACTIVATION_KEY' then you just need to run 
+```bash
+python app.py --verbose --pause-threshold=0.5 --speech-timeout=6.0 --language-model='dolphin-phi:2.7b-v2.6-q4_K_S'  
 ```
 
 License
