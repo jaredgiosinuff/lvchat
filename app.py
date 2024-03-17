@@ -1,7 +1,11 @@
+import os
+import sys
+import argparse
+import queue
+import sounddevice as sd
 import speech_recognition as sr
 import subprocess
 import requests
-import argparse
 import logging
 from collections import deque
 import whisper
@@ -12,9 +16,11 @@ import re
 import json
 import nltk
 import select
-import sys
 import termios
 import tty
+import pvporcupine
+import threading
+from pvrecorder import PvRecorder
 
 # Ensure nltk punkt tokenizer is downloaded
 nltk.download('punkt', quiet=True)
@@ -36,7 +42,18 @@ parser.add_argument('--whisper-model', type=str, default='tiny', choices=['tiny'
 parser.add_argument('--stream-response', action='store_true', default=True, help='Stream the response from the language model. Default is True.')
 parser.add_argument('--language-model', type=str, default='openhermes:7b-mistral-v2.5-q4_K_M', help='Language model to use with Ollama.')
 parser.add_argument('--verbose', action='store_true', help='Show all output from the language model, including JSON data, for debugging purposes.')
+parser.add_argument('--porcupine-key', type=str, default=None, help='Specify Porcupine activation key')
+parser.add_argument('--porcupine-model-path', type=str, default=None, help='Specify the path to the Porcupine model folder')
 args = parser.parse_args()
+
+# Get the absolute path of the script
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Check if the "models" folder exists relative to the script's directory
+models_folder = os.path.join(script_dir, 'models')
+if not os.path.exists(models_folder):
+    # If the "models" folder doesn't exist, use the specified path or the default path
+    models_folder = args.porcupine_model_path or os.path.join('lvchat', 'models')
 
 # Initialize Whisper model if needed
 if args.use_whisper:
@@ -48,6 +65,23 @@ r.pause_threshold = args.pause_threshold
 
 # Initialize conversation history
 conversation_history = deque(maxlen=args.max_history)
+
+# Initialize Porcupine if activation key is provided
+porcupine = None
+keyword_paths = []
+if args.porcupine_key or os.environ.get('PORCUPINE_KEY'):
+    activation_key = args.porcupine_key or os.environ.get('PORCUPINE_KEY')
+    if os.path.exists(models_folder):
+        for file in os.listdir(models_folder):
+            if file.endswith('.ppn'):
+                keyword_paths.append(os.path.join(models_folder, file))
+
+    if keyword_paths:
+        porcupine = pvporcupine.create(access_key=activation_key, keyword_paths=keyword_paths)
+    else:
+        logging.warning(f'No .ppn files found in the "{models_folder}" folder.')
+else:
+    logging.warning('Porcupine activation key not provided. Wake word detection will not be used.')
 
 def flush_input():
     """Flush any pending input from stdin to ensure fresh read for spacebar."""
@@ -77,16 +111,20 @@ def transcribe_with_whisper(audio_buffer, model):
 
 def listen_for_keyword(source):
     logging.info("Listening for keyword...")
-    if args.use_whisper:
-        with sr.Microphone() as mic:
-            r.adjust_for_ambient_noise(mic)
-            audio_data = r.record(mic, duration=args.keyword_timeout)
-            audio_buffer = io.BytesIO(audio_data.get_wav_data())
-            audio_text = transcribe_with_whisper(audio_buffer, model)
-            if args.keyword in audio_text:
-                logging.info("Keyword detected. Ready for speech...")
-                greet_user()
-                return True
+    if porcupine:
+        recorder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
+        recorder.start()
+        try:
+            while True:
+                pcm = recorder.read()
+                result = porcupine.process(pcm)
+                if result >= 0:
+                    logging.info("Keyword detected. Ready for speech...")
+                    greet_user()
+                    return True
+        finally:
+            recorder.stop()
+            recorder.delete()
     else:
         try:
             audio = r.listen(source, timeout=args.keyword_timeout)
@@ -123,13 +161,18 @@ def listen_for_speech(source):
             audio_buffer = io.BytesIO(audio_data.get_wav_data())
             audio_text = transcribe_with_whisper(audio_buffer, model)
             logging.info(f"User said: {audio_text}")
-            processing_model_response()
+            # Start a new thread for the verbal response
+            response_thread = threading.Thread(target=processing_model_response)
+            response_thread.start()
             return audio_text
     else:
         try:
             audio_data = r.listen(source, timeout=args.speech_timeout)
             text = r.recognize_google(audio_data).lower()
             logging.info(f"User said: {text}")
+            # Start a new thread for the verbal response
+            response_thread = threading.Thread(target=processing_model_response)
+            response_thread.start()
             return text
         except sr.WaitTimeoutError:
             logging.warning("Listening timed out while waiting for speech to start.")
@@ -223,5 +266,8 @@ def main_loop(mode):
                     send_to_ollama_and_respond(text)
 
 if __name__ == "__main__":
-    main_loop(args.mode)
-
+    try:
+        main_loop(args.mode)
+    finally:
+        if porcupine:
+            porcupine.delete()
