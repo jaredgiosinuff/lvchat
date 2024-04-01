@@ -1,100 +1,126 @@
-LVChat: Speech Recognition Local Voice Chat with Ollama
+# LVChat: Enhanced Voice-Activated AI Assistant
 
-==============================================================
+LVChat is an enhanced voice-activated AI assistant application that provides advanced speech recognition capabilities with conversation context management. It offers a modular and extensible architecture, allowing for easy customization and integration with various language models and APIs. LVChat supports keyword activation and continuous conversation modes, enabling seamless interaction with the assistant.
 
-LVChat is an application that provides speech recognition capabilities with conversation context management. It supports two modes of operation: keyword activation and continuous conversation mode. The app uses Google Speech Recognition API or Whisper for speech-to-text conversion and Ollama API for generating responses based on the conversation context. It also integrates Picovoice's Porcupine for offline wake word detection.
+## Features
 
-Remember, in Settings -> Accessibility -> Spoken Content, you can change the voice used by the `say` command to a Siri voice that does decent fast TTS generation.
+- Voice activation using wake words or continuous conversation mode
+- Speech recognition using Whisper or Google Speech Recognition
+- Semantic intent recognition using Picovoice Rhino, Rasa, or literal keyword matching
+- Integration with Ollama or ChatGPT APIs for generating intelligent responses
+- Modular architecture with support for custom extensions
+- Configurable settings through a YAML configuration file or command-line arguments
+- Conversation history management with configurable timeout
+- Streaming or non-streaming response generation
+- Verbose mode for detailed logging and debugging
+- Preloading of Whisper model for faster initial response time
 
-Requirements
-------------
+## Requirements
 
-* Ollama running on your local system, with the `openhermes:7b-mistral-v2.5-q4_K_M` model running. You can change this inside the script if you do not have that model. This will soon be customizable.
-* Python 3.7+
-* Required libraries (see `requirements.txt`)
-* Porcupine activation key (optional, for offline wake word detection)
-* Porcupine model files (`.ppn` files) placed in the `models` folder (optional, for offline wake word detection).   You can train your own wake word in less than a minute on PicoVoice's website.   Do it.  It is easy.   And it is definitely better than using whisper (at least from all of my testing)
+- Python 3.x
+- speechRecognition library
+- requests library
+- argparse library
+- logging library
+- platform library
+- collections library
+- whisper library
+- pyyaml library
+- pvporcupine library
+- pvrhino library (optional, for Picovoice Rhino intent recognition)
+- rasa library (optional, for Rasa intent recognition)
 
-Installation
-------------
+## Installation
 
-1. Clone this repository:
-```bash
-git clone https://github.com/yourusername/lvchat.git
-```
+1. Clone the LVChat repository:
+
+   ```bash
+   git clone https://github.com/yourusername/lvchat.git
+   ```
+
 2. Change your working directory to the cloned repository:
-```bash
-cd lvchat
-```
-3. Install the required libraries using pip:
-```bash
-pip install -r requirements.txt
-```
-4. If you want to use offline wake word detection with Porcupine:
-   - Obtain a Porcupine activation key from Picovoice.  
-   - Place your Porcupine model files (`.ppn` files) in the `models` folder.
 
-Usage
------
+   ```bash
+   cd lvchat
+   ```
+
+3. Install the required libraries using pip:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Set up the configuration:
+   - Copy the `config.yaml.example` file to `config.yaml`:
+
+     ```bash
+     cp config.yaml.example config.yaml
+     ```
+
+   - Modify the `config.yaml` file to set your desired configuration options, such as the language model, speech recognition settings, and extension configurations.
+
+5. (Optional) If you want to use Picovoice Rhino for wake word detection or intent recognition, make sure to set the `porcupine_key` in the `config.yaml` file or as an environment variable.
+
+6. (Optional) If you want to use custom extensions, place your extension folders inside the `extensions` directory. Each extension folder should contain an `extension.py` file and a `config.yaml` file for extension-specific configuration.
+
+## Usage
 
 To run the LVChat app, use the following command:
+
 ```bash
-python app.py [options]
+python main.py [options]
 ```
 
 The available command-line options are:
 
-* `--mode`: Mode of operation. Choose between 'keyword' for keyword activation and 'conversation' for continuous conversation mode. Default is 'keyword'.
-* `--keyword`: Keyword phrase to listen for in keyword mode. Default is "hey assistant".
-* `--keyword-timeout`: Timeout (in seconds) for listening for the keyword phrase. Default is 5.0.
-* `--speech-timeout`: Timeout (in seconds) for listening for speech input. Default is 5.0.
-* `--pause-threshold`: Pause threshold (in seconds) for speech recognition. Default is 0.8.
-* `--max-history`: Maximum number of utterances to keep in the conversation history. Default is 10.
-* `--use-whisper`: Use Whisper for speech recognition instead of Google Speech Recognition.
-* `--whisper-model`: The choices for the Whisper model are 'tiny', 'base', 'small', 'medium', or 'large'. For CPU inferencing, 'tiny' is recommended.
-* `--stream-response`: Stream and buffer the response from Ollama. This will start speaking the response sooner, one sentence at a time.
-* `--language-model`: Language model to use with Ollama. Default is 'openhermes:7b-mistral-v2.5-q4_K_M'.
-* `--verbose`: Show all output from the language model, including JSON data, for debugging purposes.
-* `--porcupine-key`: Specify the Porcupine activation key for offline wake word detection.
-* `--porcupine-model-path`: Specify the path to the Porcupine model folder. Default is the `models` folder relative to the script's directory.
+- `--config`: Path to the configuration file. Default is 'config.yaml'.
+- `--mode`: Mode of operation. Choose between 'keyword' for keyword activation and 'conversation' for continuous conversation mode.
+- `--keyword`: Keyword phrase to listen for in keyword mode.
+- `--keyword-timeout`: Timeout (in seconds) for listening for the keyword phrase.
+- `--speech-timeout`: Timeout (in seconds) for listening for speech input.
+- `--pause-threshold`: Pause threshold (in seconds) for speech recognition.
+- `--max-history`: Maximum number of utterances to keep in the conversation history.
+- `--use-whisper`: Use Whisper for speech recognition instead of Google Speech Recognition.
+- `--whisper-model`: Whisper model to use (tiny, base, small, medium, large).
+- `--stream-response`: Stream the response from the language model.
+- `--language-model`: Language model to use with Ollama.
+- `--verbose`: Show all output from the language model, including JSON data, for debugging purposes.
+- `--porcupine-key`: Specify Porcupine activation key.
+- `--porcupine-model-path`: Specify the path to the Porcupine model folder.
+- `--ollama-url`: URL of the Ollama server.
+- `--ollama-port`: Port of the Ollama server.
+- `--temperature`: Temperature for the Ollama model. Default is 0.1.
 
-Note: The app is currently configured to use the Ollama API at "localhost:11434". You can change these settings in the script if needed.
+Note: The app is currently configured to use Ollama API with the "dolphin-phi:2.7b-v2.6-q4_K_S" model at "localhost:11434". You can change these settings in the `config.yaml` file or through command-line arguments.
 
-Example
--------
+## Customization
 
-To run LVChat in keyword mode with the default settings, use the following command:
-```bash
-python app.py --mode keyword
-```
+- Customize the behavior of LVChat by modifying the `config.yaml` file or providing command-line arguments. Refer to the `config.yaml.example` file for available configuration options.
 
-To run LVChat in continuous conversation mode with a custom keyword phrase and Porcupine wake word detection, use the following command:
-```bash
-python3 app.py --verbose --pause-threshold=0.5 --speech-timeout=6.0 --language-model='dolphin-phi:2.7b-v2.6-q4_K_S' --porcupine-key='ACTIVATION_KEY' 
-```
+- Create custom extensions by adding a new folder for each extension inside the `extensions` directory. Each extension folder should contain an `extension.py` file with the necessary functions (`initialize`, `handle_command`, etc.) and a `config.yaml` file for extension-specific configuration. Refer to the existing extensions for examples.
 
-or if you set your activation key by running 'export ACTIVATION_KEY' then you just need to run 
-```bash
-python app.py --verbose --pause-threshold=0.5 --speech-timeout=6.0 --language-model='dolphin-phi:2.7b-v2.6-q4_K_S'  
-```
+- Use a different intent recognition method by updating the `intent_recognition` setting in the `config.yaml` file and providing the necessary configuration options for the selected method.
 
-License
--------
+## Acknowledgements
 
-This project is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file for details.
+LVChat builds upon the work of various open-source libraries and tools, including:
 
-Acknowledgements
-----------------
+- [OpenAI Whisper](https://github.com/openai/whisper) for speech recognition
+- [Picovoice Porcupine](https://github.com/Picovoice/porcupine) for wake word detection
+- [Picovoice Rhino](https://github.com/Picovoice/rhino) for intent recognition
+- [Rasa](https://rasa.com/) for intent recognition
+- [Ollama](https://github.com/OllamaAI/ollama) for language model integration
 
-* Google Speech Recognition API: https://cloud.google.com/speech-to-text
-* Whisper: https://github.com/openai/whisper
-* Ollama API: https://github.com/ollama-ai/ollama
-* Porcupine: https://github.com/Picovoice/porcupine
+Special thanks to the developers and contributors of these projects for their excellent work.
 
-Limitations
------------
+## Limitations
 
-* Text-to-speech is only supported on macOS using the built-in `say` command. Other platforms may not support text-to-speech functionality.
-* The app currently uses the `requests` library for HTTP requests to the Ollama API. Make sure to have the required libraries installed.
-* Logging is enabled by default, with log messages displayed in the console. Adjust the log level or modify the logging configuration in the script if needed.
-* Offline wake word detection using Porcupine requires an activation key and model files (`.ppn` files) placed in the `models` folder. Make sure to obtain the necessary files and provide the activation key when running the script.
+- Text-to-speech is only supported on macOS using the built-in `say` command. Other platforms may not support text-to-speech functionality.
+
+## Contributing
+
+Contributions to LVChat are welcome! If you find any issues or have suggestions for improvements, please open an issue or submit a pull request on the GitHub repository.
+
+## License
+
+LVChat is released under the [License](LICENSE).

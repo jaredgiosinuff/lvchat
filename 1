@@ -1,0 +1,173 @@
+import argparse
+import asyncio
+import io
+import json
+import logging
+import random
+import re
+import subprocess
+from collections import deque
+
+import aiohttp
+import numpy as np
+import sounddevice as sd
+import whisper
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Speech recognition with conversation context management.")
+parser.add_argument('--mode', type=str, default='keyword', choices=['keyword', 'conversation'],
+                    help='Mode of operation: "keyword" for keyword activation, "conversation" for continuous conversation mode.')
+parser.add_argument('--keyword', type=str, default="hey assistant", help='Keyword phrase to listen for in keyword mode.')
+parser.add_argument('--pause-threshold', type=float, default=0.8, help='Pause threshold (in seconds) for speech recognition.')
+parser.add_argument('--max-history', type=int, default=10, help='Maximum number of utterances to keep in the conversation history.')
+parser.add_argument('--whisper-model', type=str, default='tiny', choices=['tiny', 'base', 'small', 'medium', 'large'], help='Whisper model to use.')
+parser.add_argument('--stream-response', action='store_true', default=True, help='Stream the response from the language model. Default is True.')
+parser.add_argument('--language-model', type=str, default='openhermes:7b-mistral-v2.5-q4_K_M', help='Language model to use with Ollama.')
+parser.add_argument('--verbose', action='store_true', help='Show all output from the language model, including JSON data, for debugging purposes.')
+parser.add_argument('--greetings', type=str, default="Hello.. how can I help you?,Hey there.. what can I do for you?,Hi.. ready to assist you.,Hello", help='Comma-separated list of custom greetings.')
+parser.add_argument('--processing-responses', type=str, default="Give me a moment to ponder that.,Just a moment while I consider what you have said.", help='Comma-separated list of custom processing model responses.')
+args = parser.parse_args()
+
+# Initialize Whisper model
+model = whisper.load_model(args.whisper_model)
+
+# Initialize conversation history
+conversation_history = deque(maxlen=args.max_history)
+
+def transcribe_with_whisper(audio_data):
+    """Transcribe audio using Whisper model."""
+    audio_buffer = io.BytesIO(audio_data)
+    audio_array = np.frombuffer(audio_buffer.getvalue(), dtype=np.int16)
+    audio_float32 = audio_array.astype(np.float32) / 32768.0
+    result = model.transcribe(audio_float32)
+    transcribed_text = result["text"].lower()
+    logging.info(f"Whisper transcription: {transcribed_text}")  # Debug logging
+    return transcribed_text
+
+def greet_user():
+    """Greet the user with a random greeting."""
+    greetings = args.greetings.split(",")
+    greeting = random.choice(greetings)
+    logging.info(f"Greeting: {greeting}")
+    subprocess.call(['say', greeting])
+
+async def processing_model_response():
+    """Speak a random processing model response."""
+    responses = args.processing_responses.split(",")
+    response = random.choice(responses)
+    logging.info(f"Processing model response: {response}")
+    subprocess.call(['say', response])
+
+def speak_sentence(sentence):
+    """Speak a single sentence."""
+    logging.info(f"Speaking: {sentence}")
+    subprocess.call(['say', sentence])
+
+async def send_to_ollama_and_respond(text):
+    """Send text to Ollama API and process the response."""
+    if text is None:
+        logging.info("No text to send for processing.")
+        return
+    conversation_history.append(f"User: {text}")
+    prompt_text = "\n".join(conversation_history)
+    ollama_url = "http://localhost:11434/api/generate"
+    payload = {"model": args.language_model, "prompt": prompt_text, "stream": args.stream_response}
+
+    logging.info("Sending text to language model for processing...")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(ollama_url, json=payload) as response:
+                sentence_buffer = ""
+                if args.stream_response:
+                    async for line in response.content:
+                        if line:
+                            data = json.loads(line)
+                            if args.verbose:
+                                logging.debug(f"Streamed JSON data: {data}")
+                            if 'response' in data:
+                                sentence_buffer += data['response']
+                                if any(sentence_buffer.endswith(punc) for punc in '.!?'):
+                                    if sentence_buffer.strip():
+                                        speak_sentence(sentence_buffer)
+                                        conversation_history.append(f"Ollama: {sentence_buffer}")
+                                        sentence_buffer = ""  # Reset buffer after speaking
+                                if data.get("done", False):
+                                    break
+                    if sentence_buffer.strip():
+                        speak_sentence(sentence_buffer)
+                        conversation_history.append(f"Ollama: {sentence_buffer}")
+                else:
+                    data = await response.json()
+                    if 'response' in data:
+                        sentences = re.split('(?<=[.!?]) +', data['response'])
+                        for sentence in sentences:
+                            if sentence:
+                                speak_sentence(sentence)
+                                conversation_history.append(f"Ollama: {sentence}")
+    except aiohttp.ClientError as e:
+        logging.error(f"Error sending request to Ollama API: {e}")
+
+async def main_loop(mode):
+    """Main loop for the assistant."""
+    if mode == "keyword":
+        CHUNK_SIZE = 8192
+        SAMPLE_RATE = 16000
+        CHANNELS = 1
+
+        def callback(indata, frames, time, status):
+            if status:
+                logging.error(f"Audio input stream error: {status}")
+            audio_data = indata.tobytes()
+            audio_text = transcribe_with_whisper(audio_data)
+            if args.keyword.lower() in audio_text:
+                logging.info("Keyword detected. Ready for speech...")
+                greet_user()
+                while True:
+                    logging.info("Listening for speech...")
+                    audio_data = indata.tobytes()
+                    text = transcribe_with_whisper(audio_data)
+                    if text is not None:
+                        logging.info(f"User said: {text}")
+                        if text.lower() in ["goodbye", "goodbye assistant"]:
+                            logging.info("Goodbye!")
+                            speak_sentence("Goodbye!")
+                            break
+                        asyncio.create_task(processing_model_response())
+                        asyncio.create_task(send_to_ollama_and_respond(text))
+
+        logging.info("Listening for keyword...")
+        device_info = sd.query_devices()
+        print(device_info)
+        device_id = 0
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, callback=callback, blocksize=CHUNK_SIZE):
+            while True:
+                await asyncio.sleep(0.1)
+
+    elif mode == "conversation":
+        CHUNK_SIZE = 1024
+        SAMPLE_RATE = 16000
+        CHANNELS = 1
+
+        def callback(indata, frames, time, status):
+            if status:
+                logging.error(f"Audio input stream error: {status}")
+            audio_data = indata.tobytes()
+            text = transcribe_with_whisper(audio_data)
+            if text is not None:
+                logging.info(f"User said: {text}")
+                if text.lower() in ["goodbye", "goodbye assistant"]:
+                    logging.info("Goodbye!")
+                    speak_sentence("Goodbye!")
+                    raise sd.CallbackStop
+                asyncio.create_task(processing_model_response())
+                asyncio.create_task(send_to_ollama_and_respond(text))
+
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, callback=callback, blocksize=CHUNK_SIZE):
+            while True:
+                await asyncio.sleep(0.1)
+
+if __name__ == "__main__":
+    asyncio.run(main_loop(args.mode))

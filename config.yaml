@@ -1,0 +1,61 @@
+# config.yaml for lvchat
+
+# mode defines whether or not the model is conversational and just listens for chat or if the model is keyword (wake word) dependent.
+# Nearly all testing has been wakeword dependent.   You can use Goolge's speech recognition library, but I think this program eventually
+# floods the service and it stops responding.   You can use Whisper, but current whisper models add in some unexpected text when silence
+# is detected and it messes with the effectiveness of using it as a wakeword.  At present, the only true wake word supported is picovoices
+# porcupine which is free for up to 3 users, and they make training a model very easy.   You can train your own "Hey assistant" wake word
+# and the experience here becomes quite decent.
+
+mode: keyword
+
+# the keyword here is used only if you do not have a porcupine key configured.  The keyword_timeout is in seconds and is needed to capture
+# the full phrase or keyword.   Select a simple two syllable wakeword like bingo for the best experience if you are using a keyword instead
+# of a wake word.
+keyword: "hey assistant"
+keyword_timeout: 3.0
+
+
+# the speech timeout tuning seems to be the most important for overall positive experience.   I find a value of 6.0 (in seconds) to 
+# to be a good balance.   6.5 might be even better.  The pause threshold is how long of empty silence does it wait to consider a pause 
+# the end of what you are saying.
+speech_timeout: 6.0
+pause_threshold: 0.6
+
+# how much of the historic conversation is kept.  10 means the last then responses are kept so that the model can remember what was last said.
+# Smaller models struggle a lot with context switching so I may provide a history timeout, like if there has been 10 minutes of silence or no
+# activity, then wipe the history clean. 
+max_history: 10
+
+# this is to determine if you are going to use whisper.   If false, then all speech to text will use the google speech recognition library
+use_whisper: true
+
+# which whisper model to use.   The smaller the model, the less accurate it is but the faster and more efficient it is.   I really like the
+# smallest model
+whisper_model: tiny
+
+# this is to set the previous conversation timeout.   Smaller models struggle with context switching so we time out previous conversation
+# history.   The number is in seconds.  300 seconds = 5 min as the default.
+history_timeout: 300
+
+# for the best conversational experience, stream the response.   The model will buffer a scentence and then start to speak it.   This provides
+# the shortest time between sending the prompt to ollama and beginning to speak on what is being inferenced in response.
+stream_response: true
+
+# I recommend using dolphin-phi due to its small size and decent conversational experience.  However, if your system can handle larger
+# models like mixtral, then by all means, use that as it will greatly improve the overall quality of response.
+language_model: 'dolphin-phi:2.7b-v2.6-q4_K_S'
+
+# verbose mode is good for debugging issues
+verbose: true
+
+#porcupine_key: 'your_porcupine_key'
+#porcupine_model_path: './models'
+porcupine_key: 'jGm16KZYt6tthYHzfNHvvK/clb2UrX9JgD49q5FsbdmltZKsIgc/6A=='
+porcupine_model_path: './models'
+
+#ollama config
+ollama_url: 'http://localhost'
+ollama_port: 11434
+temperature: 0.1
+
