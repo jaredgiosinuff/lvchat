@@ -51,7 +51,7 @@ verbose: true
 
 #porcupine_key: 'your_porcupine_key'
 #porcupine_model_path: './models'
-porcupine_key: 'jGm16KZYt6tthYHzfNHvvK/clb2UrX9JgD49q5FsbdmltZKsIgc/6A=='
+porcupine_key: '<your-key-here>'
 porcupine_model_path: './models'
 
 #ollama config
